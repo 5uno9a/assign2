@@ -55,6 +55,11 @@ public class Switch extends Device {
 
     @Override
     public void handlePacket(Ethernet frame, Iface inIface) {
+        System.out.println(
+            "*** -> Received packet: " +
+                frame.toString().replace("\n", "\n\t")
+        );
+
         // Learn source on every received frame (refreshes timestamp + port).
         learn(frame.getSourceMAC(), inIface);
 
