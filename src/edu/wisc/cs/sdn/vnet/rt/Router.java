@@ -89,56 +89,25 @@ public class Router extends Device {
 
 		IPv4 ip = (IPv4) etherPacket.getPayload();
 
-		// 2. Verify IPv4 checksum
+		// verify IPv4 checksum using IPv4's own logic
 		short origCksum = ip.getChecksum();
-		ip.setChecksum((short) 0);
-
-		byte[] serialized = ip.serialize(); // header + payload
-		int headerLenBytes = ip.getHeaderLength() * 4;
-		int computed = 0;
-		for (int i = 0; i < headerLenBytes; i += 2) {
-			int b1 = (serialized[i] & 0xff);
-			int b2 = (i + 1 < headerLenBytes) ? (serialized[i + 1] & 0xff) : 0;
-			computed += (b1 << 8) | b2;
-		}
-
-		// Fold 32-bit sum to 16 bits and invert
-		while ((computed & 0xffff0000) != 0) {
-			computed = (computed & 0xffff) + (computed >>> 16);
-		}
-		computed = ~computed & 0xffff;
-		short computedCksum = (short) computed;
+		ip.resetChecksum();   // sets checksum field to 0
+		ip.serialize();       // recomputes checksum and stores it in ip
+		short computedCksum = ip.getChecksum();
 
 		if (computedCksum != origCksum) {
-			return; // checksum invalid -> drop
+			return;
 		}
 
-		// Store back the verified checksum
-		ip.setChecksum(computedCksum);
-
-		// 3. Decrement TTL and recompute checksum
+		// decrement TTL and recompute checksum again
 		int ttl = ip.getTtl() & 0xff;
 		if (ttl <= 1) {
-			return; // would become 0 -> drop
+			return;
 		}
 		ip.setTtl((byte) (ttl - 1));
 
-		// Recompute checksum after TTL change
-		ip.setChecksum((short) 0);
-		serialized = ip.serialize();
-		headerLenBytes = ip.getHeaderLength() * 4;
-		computed = 0;
-		for (int i = 0; i < headerLenBytes; i += 2) {
-			int b1 = (serialized[i] & 0xff);
-			int b2 = (i + 1 < headerLenBytes) ? (serialized[i + 1] & 0xff) : 0;
-			computed += (b1 << 8) | b2;
-		}
-		while ((computed & 0xffff0000) != 0) {
-			computed = (computed & 0xffff) + (computed >>> 16);
-		}
-		computed = ~computed & 0xffff;
-		computedCksum = (short) computed;
-		ip.setChecksum(computedCksum);
+		ip.resetChecksum();
+		ip.serialize();
 
 		// 4. Drop packets destined to the router itself
 		int dstIp = ip.getDestinationAddress();
