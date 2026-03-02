@@ -143,6 +143,7 @@ public class Router extends Device {
 		MACAddress dstMac = ae.getMac();
 		MACAddress srcMac = outIface.getMacAddress();
 		if (dstMac == null || srcMac == null) {
+			System.err.println("Router: dropping packet - null MAC (dst=" + (dstMac == null) + " src=" + (srcMac == null) + ") outIface=" + outIface.getName());
 			return;
 		}
 
