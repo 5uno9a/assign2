@@ -142,6 +142,9 @@ public class Router extends Device {
 		// 9. Rewrite Ethernet header
 		MACAddress dstMac = ae.getMac();
 		MACAddress srcMac = outIface.getMacAddress();
+		if (dstMac == null || srcMac == null) {
+			return;
+		}
 
 		etherPacket.setDestinationMACAddress(dstMac.toBytes());
 		etherPacket.setSourceMACAddress(srcMac.toBytes());
