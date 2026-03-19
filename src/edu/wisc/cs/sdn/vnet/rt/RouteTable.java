@@ -163,7 +163,7 @@ public class RouteTable {
             }
 
             // Add an entry to the route table
-            this.insert(dstIp, gwIp, maskIp, iface);
+            this.insert(dstIp, gwIp, maskIp, iface, true, 0);
         }
 
         // Close the file
@@ -181,8 +181,8 @@ public class RouteTable {
      * @param iface router interface out which to send packets to reach the
      *		destination or gateway
      */
-    public void insert(int dstIp, int gwIp, int maskIp, Iface iface) {
-        RouteEntry entry = new RouteEntry(dstIp, gwIp, maskIp, iface);
+    public void insert(int dstIp, int gwIp, int maskIp, Iface iface, boolean isDirect, int metric) {
+        RouteEntry entry = new RouteEntry(dstIp, gwIp, maskIp, iface, isDirect, metric);
         synchronized (this.entries) {
             this.entries.add(entry);
         }
@@ -213,7 +213,7 @@ public class RouteTable {
      * @param iface new router interface for matching entry
      * @return true if a matching entry was found and updated, otherwise false
      */
-    public boolean update(int dstIp, int maskIp, int gwIp, Iface iface) {
+    public boolean update(int dstIp, int maskIp, int gwIp, Iface iface, int metric) {
         synchronized (this.entries) {
             RouteEntry entry = this.find(dstIp, maskIp);
             if (null == entry) {
@@ -221,6 +221,8 @@ public class RouteTable {
             }
             entry.setGatewayAddress(gwIp);
             entry.setInterface(iface);
+            entry.setMetric(metric);
+            entry.refreshLastUpdated();
         }
         return true;
     }
@@ -257,5 +259,28 @@ public class RouteTable {
             }
             return result;
         }
+    }
+
+    public void updateFromRip(int dstIp, int maskIp, int gwIp, int metric, Iface iface) {
+        int newMetric = metric + 1; // add 1 hop to the metric learned from RIP
+
+        RouteEntry match = find(dstIp, maskIp);
+        if (match == null) {
+            insert(dstIp, gwIp, maskIp, iface, false, newMetric);
+            return;
+        }
+
+        if (match.isDirectRoute()) return;
+
+        if (newMetric <= match.getMetric()) update(dstIp, maskIp, gwIp, iface, newMetric);
+    }
+
+    public void insertDirect() {
+        
+
+    }
+
+    private void cleanExpiredEntries() {
+
     }
 }

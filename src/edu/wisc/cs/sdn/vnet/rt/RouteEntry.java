@@ -1,14 +1,23 @@
 package edu.wisc.cs.sdn.vnet.rt;
 
-import net.floodlightcontroller.packet.IPv4;
 import edu.wisc.cs.sdn.vnet.Iface;
+import net.floodlightcontroller.packet.IPv4;
 
 /**
  * An entry in a route table.
  * @author Aaron Gember-Jacobson and Anubhavnidhi Abhashkumar
  */
 public class RouteEntry 
-{
+{	
+	/** Whether the route is directly connected */
+	private boolean isDirect;
+
+	/** Last time the route was updated */
+	private long lastUpdated;
+
+	/** Metric for the route (e.g., hop count) */
+	private int metric;
+
 	/** Destination IP address */
 	private int destinationAddress;
 	
@@ -31,12 +40,15 @@ public class RouteEntry
 	 *        be sent to reach the destination or gateway
 	 */
 	public RouteEntry(int destinationAddress, int gatewayAddress, 
-			int maskAddress, Iface iface)
+			int maskAddress, Iface iface, boolean isDirect, int metric)
 	{
 		this.destinationAddress = destinationAddress;
 		this.gatewayAddress = gatewayAddress;
 		this.maskAddress = maskAddress;
 		this.iface = iface;
+		this.isDirect = isDirect;
+		this.lastUpdated = System.currentTimeMillis();
+		this.metric = metric;
 	}
 	
 	/**
@@ -77,5 +89,29 @@ public class RouteEntry
 				IPv4.fromIPv4Address(this.gatewayAddress),
 				IPv4.fromIPv4Address(this.maskAddress),
 				this.iface.getName());
+	}
+
+	public boolean isDirectRoute() {
+		return isDirect;
+	}
+
+	public void setDirectRoute(boolean isDirect) {
+		this.isDirect = isDirect;
+	}
+
+	public long getLastUpdated() {
+		return lastUpdated;
+	}
+
+	public void refreshLastUpdated() {
+		this.lastUpdated = System.currentTimeMillis();
+	}
+
+	public int getMetric() {
+		return metric;
+	}
+
+	public void setMetric(int metric) {
+		this.metric = metric;
 	}
 }
