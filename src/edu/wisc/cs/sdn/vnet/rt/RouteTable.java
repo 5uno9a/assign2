@@ -13,11 +13,14 @@ import net.floodlightcontroller.packet.IPv4;
 
 /**
  * Route table for a router.
+ *
  * @author Aaron Gember-Jacobson
  */
 public class RouteTable {
 
-    /** Entries in the route table */
+    /**
+     * Entries in the route table
+     */
     private List<RouteEntry> entries;
 
     /**
@@ -29,12 +32,15 @@ public class RouteTable {
 
     /**
      * Lookup the route entry that matches a given IP address.
+     *
      * @param ip IP address
      * @return the matching route entry, null if none exists
      */
     public RouteEntry lookup(int ip) {
         synchronized (this.entries) {
-            /*****************************************************************/
+            /**
+             * **************************************************************
+             */
             /* TODO: Find the route entry with the longest prefix match	  */
             RouteEntry bestEntry = null;
             int bestPrefixLen = -1;
@@ -44,7 +50,9 @@ public class RouteTable {
                 int mask = entry.getMaskAddress();
 
                 // check if this route matches the IP
-                if ((ip & mask) != (dest & mask)) continue;
+                if ((ip & mask) != (dest & mask)) {
+                    continue;
+                }
 
                 // count numbero f 1-bits in the mask  = prefix length
                 int prefixLen = 0;
@@ -61,12 +69,15 @@ public class RouteTable {
             }
             return bestEntry;
 
-            /*****************************************************************/
+            /**
+             * **************************************************************
+             */
         }
     }
 
     /**
      * Populate the route table from a file.
+     *
      * @param filename name of the file containing the static route table
      * @param router the route table is associated with
      * @return true if route table was successfully loaded, otherwise false
@@ -91,7 +102,8 @@ public class RouteTable {
                 System.err.println(e.toString());
                 try {
                     reader.close();
-                } catch (IOException f) {}
+                } catch (IOException f) {
+                }
                 return false;
             }
 
@@ -104,33 +116,35 @@ public class RouteTable {
             String ipPattern = "(\\d+\\.\\d+\\.\\d+\\.\\d+)";
             String ifacePattern = "([a-zA-Z0-9]+)";
             Pattern pattern = Pattern.compile(
-                String.format(
-                    "%s\\s+%s\\s+%s\\s+%s",
-                    ipPattern,
-                    ipPattern,
-                    ipPattern,
-                    ifacePattern
-                )
+                    String.format(
+                            "%s\\s+%s\\s+%s\\s+%s",
+                            ipPattern,
+                            ipPattern,
+                            ipPattern,
+                            ifacePattern
+                    )
             );
             Matcher matcher = pattern.matcher(line);
             if (!matcher.matches() || matcher.groupCount() != 4) {
                 System.err.println("Invalid entry in routing table file");
                 try {
                     reader.close();
-                } catch (IOException f) {}
+                } catch (IOException f) {
+                }
                 return false;
             }
 
             int dstIp = IPv4.toIPv4Address(matcher.group(1));
             if (0 == dstIp) {
                 System.err.println(
-                    "Error loading route table, cannot convert " +
-                        matcher.group(1) +
-                        " to valid IP"
+                        "Error loading route table, cannot convert "
+                        + matcher.group(1)
+                        + " to valid IP"
                 );
                 try {
                     reader.close();
-                } catch (IOException f) {}
+                } catch (IOException f) {
+                }
                 return false;
             }
 
@@ -139,13 +153,14 @@ public class RouteTable {
             int maskIp = IPv4.toIPv4Address(matcher.group(3));
             if (0 == maskIp) {
                 System.err.println(
-                    "Error loading route table, cannot convert " +
-                        matcher.group(3) +
-                        " to valid IP"
+                        "Error loading route table, cannot convert "
+                        + matcher.group(3)
+                        + " to valid IP"
                 );
                 try {
                     reader.close();
-                } catch (IOException f) {}
+                } catch (IOException f) {
+                }
                 return false;
             }
 
@@ -153,12 +168,13 @@ public class RouteTable {
             Iface iface = router.getInterface(ifaceName);
             if (null == iface) {
                 System.err.println(
-                    "Error loading route table, invalid interface " +
-                        matcher.group(4)
+                        "Error loading route table, invalid interface "
+                        + matcher.group(4)
                 );
                 try {
                     reader.close();
-                } catch (IOException f) {}
+                } catch (IOException f) {
+                }
                 return false;
             }
 
@@ -169,17 +185,19 @@ public class RouteTable {
         // Close the file
         try {
             reader.close();
-        } catch (IOException f) {}
+        } catch (IOException f) {
+        }
         return true;
     }
 
     /**
      * Add an entry to the route table.
+     *
      * @param dstIp destination IP
      * @param gwIp gateway IP
      * @param maskIp subnet mask
      * @param iface router interface out which to send packets to reach the
-     *		destination or gateway
+     * destination or gateway
      */
     public void insert(int dstIp, int gwIp, int maskIp, Iface iface, boolean isDirect, int metric) {
         RouteEntry entry = new RouteEntry(dstIp, gwIp, maskIp, iface, isDirect, metric);
@@ -190,6 +208,7 @@ public class RouteTable {
 
     /**
      * Remove an entry from the route table.
+     *
      * @param dstIP destination IP of the entry to remove
      * @param maskIp subnet mask of the entry to remove
      * @return true if a matching entry was found and removed, otherwise false
@@ -207,6 +226,7 @@ public class RouteTable {
 
     /**
      * Update an entry in the route table.
+     *
      * @param dstIP destination IP of the entry to update
      * @param maskIp subnet mask of the entry to update
      * @param gatewayAddress new gateway IP address for matching entry
@@ -229,6 +249,7 @@ public class RouteTable {
 
     /**
      * Find an entry in the route table.
+     *
      * @param dstIP destination IP of the entry to find
      * @param maskIp subnet mask of the entry to find
      * @return a matching entry if one was found, otherwise null
@@ -236,10 +257,8 @@ public class RouteTable {
     private RouteEntry find(int dstIp, int maskIp) {
         synchronized (this.entries) {
             for (RouteEntry entry : this.entries) {
-                if (
-                    (entry.getDestinationAddress() == dstIp) &&
-                    (entry.getMaskAddress() == maskIp)
-                ) {
+                if ((entry.getDestinationAddress() == dstIp)
+                        && (entry.getMaskAddress() == maskIp)) {
                     return entry;
                 }
             }
@@ -261,26 +280,57 @@ public class RouteTable {
         }
     }
 
+    /**
+     * Update or insert a route based on a single RIP entry. This method handles
+     * only ONE route advertisement.
+     */
     public void updateFromRip(int dstIp, int maskIp, int gwIp, int metric, Iface iface) {
-        int newMetric = metric + 1; // add 1 hop to the metric learned from RIP
+        // RIP uses hop count, so add 1 to the advertised metric
+        int newMetric = metric + 1;
 
+        // Check if we already have a route for this subnet
         RouteEntry match = find(dstIp, maskIp);
+
+        // Case 1: No existing route → insert as learned route
         if (match == null) {
             insert(dstIp, gwIp, maskIp, iface, false, newMetric);
             return;
         }
 
-        if (match.isDirectRoute()) return;
+        // Do not override directly connected routes
+        if (match.isDirectRoute()) {
+            return;
+        }
 
-        if (newMetric <= match.getMetric()) update(dstIp, maskIp, gwIp, iface, newMetric);
+        // Case 2: Existing learned route → update if new path is better or equal
+        // (equal metric simplifies logic and refreshes route)
+        if (newMetric <= match.getMetric()) {
+            update(dstIp, maskIp, gwIp, iface, newMetric);
+        }
     }
 
-    public void insertDirect() {
-        
-
+    /**
+     * Insert a directly connected route (from router interfaces). These routes:
+     * - have no gateway (gwIp = 0) - never expire
+     */
+    public void insertDirect(int dstIp, int maskIp, Iface iface) {
+        synchronized (this.entries) {
+            insert(dstIp, 0, maskIp, iface, true, 0);
+        }
     }
 
-    private void cleanExpiredEntries() {
+    /**
+     * Remove all expired learned routes. Direct routes are preserved. A route
+     * expires if it has not been updated for 30 seconds.
+     */
+    public void cleanExpiredEntries() {
+        synchronized (this.entries) {
+            long now = System.currentTimeMillis();
 
+            this.entries.removeIf(entry
+                    -> !entry.isDirectRoute()
+                    && (now - entry.getLastUpdated()) > 30000
+            );
+        }
     }
 }
