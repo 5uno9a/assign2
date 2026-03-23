@@ -281,6 +281,15 @@ public class RouteTable {
     }
 
     /**
+     * Return a snapshot copy of all route entries.
+     */
+    public List<RouteEntry> getEntries() {
+        synchronized (this.entries) {
+            return new LinkedList<RouteEntry>(this.entries);
+        }
+    }
+
+    /**
      * Update or insert a route based on a single RIP entry. This method handles
      * only ONE route advertisement.
      */
