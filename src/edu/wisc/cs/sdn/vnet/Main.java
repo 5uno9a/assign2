@@ -81,6 +81,9 @@ public class Main
 		vnsComm = new VNSComm(dev);
 		if (!vnsComm.connectToServer(port, server))
 		{ System.exit(1); }
+		/* RIP must be requested before VNS_HW_INFO so tryStartRipIfReady can run when HW is applied */
+		if (dev instanceof Router && routeTableFile == null)
+		{ ((Router)dev).setRipModeRequested(); }
 		vnsComm.readFromServerExpect(Command.VNS_HW_INFO);	
 		
 		if (dev instanceof Router) 
@@ -89,7 +92,7 @@ public class Main
 			if (routeTableFile != null)
 			{ ((Router)dev).loadRouteTable(routeTableFile); }
 			else
-			{ ((Router)dev).startRip(); }
+			{ ((Router)dev).finishRipStartup(); }
 			
 			// Read static ACP cache
 			if (arpCacheFile != null)

@@ -13,6 +13,7 @@ import net.floodlightcontroller.packet.MACAddress;
 
 import edu.wisc.cs.sdn.vnet.Device;
 import edu.wisc.cs.sdn.vnet.Iface;
+import edu.wisc.cs.sdn.vnet.rt.Router;
 
 public class VNSComm 
 {
@@ -98,6 +99,10 @@ public class VNSComm
 		{
 			for (Iface iface : this.device.getInterfaces().values())
 			{ System.out.println(iface.toString()); }
+		}
+
+		if (this.device instanceof Router) {
+			((Router) this.device).tryStartRipIfReady();
 		}
 		
 		return true;

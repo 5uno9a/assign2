@@ -19,11 +19,17 @@ import net.floodlightcontroller.packet.MACAddress;
  * @author Aaron Gember-Jacobson and Anubhavnidhi Abhashkumar
  */
 public class Router extends Device {
-	/** True when dynamic RIP mode is active */
+	/** User asked for RIP (no static -r); start may wait until HW is complete */
+	private boolean ripModeRequested = false;
+
+	/** True once RIP is running (direct routes + timer installed) */
 	private boolean ripEnabled = false;
 
 	/** Periodic RIP timer (10s advertisements + cleanup) */
-	private Timer ripTimer;	
+	private Timer ripTimer;
+
+	/** Retries RIP startup until all interfaces have MAC/IP/mask (POX timing) */
+	private Timer ripStartRetryTimer;	
 
     /** Routing table for the router */
     private RouteTable routeTable;
@@ -90,6 +96,8 @@ public class Router extends Device {
 	 * @param inIface the interface on which the packet was received
 	 */
 	public void handlePacket(Ethernet etherPacket, Iface inIface) {
+		tryStartRipIfReady();
+
 		System.out.println(
 			"*** -> Received packet: " +
 				etherPacket.toString().replace("\n", "\n\t")
@@ -187,41 +195,106 @@ public class Router extends Device {
 		/********************************************************************/
 	}
 
+	/** Enable RIP before VNS_HW_INFO is read (call from Main). */
+	public void setRipModeRequested() {
+		this.ripModeRequested = true;
+	}
+
 	/**
- * Start RIP mode (only called when static route table is absent).
- */
-public void startRip()
-{
-    if (this.ripEnabled) { return; }
-    this.ripEnabled = true;
+	 * After HW info (and ARP load order), complete RIP startup or schedule retries.
+	 */
+	public void finishRipStartup() {
+		tryStartRipIfReady();
+		if (this.ripModeRequested && !this.ripEnabled) {
+			scheduleRipStartRetries();
+		}
+	}
 
-    // Insert directly connected routes (never expire)
-    for (Iface iface : this.interfaces.values())
-    {
-        int subnet = iface.getIpAddress() & iface.getSubnetMask();
-        this.routeTable.insertDirect(subnet, iface.getSubnetMask(), iface);
-    }
+	/** @deprecated use setRipModeRequested + finishRipStartup from Main */
+	public void startRip() {
+		setRipModeRequested();
+		finishRipStartup();
+	}
 
-    // Send initial RIP request on all interfaces
-    sendRipRequestAll();
+	private void scheduleRipStartRetries() {
+		if (this.ripStartRetryTimer != null) {
+			return;
+		}
+		this.ripStartRetryTimer = new Timer(true);
+		this.ripStartRetryTimer.scheduleAtFixedRate(new TimerTask() {
+			private int attempts;
 
-    // Periodic task: unsolicited responses every 10s + expiry cleanup
-    this.ripTimer = new Timer(true);
-    this.ripTimer.scheduleAtFixedRate(new TimerTask() {
-        @Override
-        public void run()
-        {
-            sendRipResponseAll();
-            routeTable.cleanExpiredEntries();
-        }
-    }, 10000, 10000);
-}
+			@Override
+			public void run() {
+				tryStartRipIfReady();
+				attempts++;
+				if (Router.this.ripEnabled || attempts > 200) {
+					if (!Router.this.ripEnabled && Router.this.ripModeRequested) {
+						System.err.println(
+							"Router: RIP could not start; interfaces missing MAC/IP/mask after wait.");
+					}
+					Router.this.ripStartRetryTimer.cancel();
+					Router.this.ripStartRetryTimer = null;
+				}
+			}
+		}, 250, 250);
+	}
+
+	/**
+	 * Called after VNS_HW_INFO is applied; starts RIP if all interfaces are configured.
+	 */
+	public void tryStartRipIfReady() {
+		if (!this.ripModeRequested || this.ripEnabled) {
+			return;
+		}
+		if (this.interfaces.isEmpty() || !allInterfacesFullyConfigured()) {
+			return;
+		}
+
+		this.ripEnabled = true;
+
+		// Insert directly connected routes (never expire)
+		for (Iface iface : this.interfaces.values()) {
+			int subnet = iface.getIpAddress() & iface.getSubnetMask();
+			this.routeTable.insertDirect(subnet, iface.getSubnetMask(), iface);
+		}
+
+		sendRipRequestAll();
+
+		this.ripTimer = new Timer(true);
+		this.ripTimer.scheduleAtFixedRate(new TimerTask() {
+			@Override
+			public void run() {
+				sendRipResponseAll();
+				routeTable.cleanExpiredEntries();
+			}
+		}, 10000, 10000);
+	}
+
+	private static boolean isIfaceReadyForRip(Iface iface) {
+		return iface != null
+			&& iface.getMacAddress() != null
+			&& iface.getIpAddress() != 0
+			&& iface.getSubnetMask() != 0;
+	}
+
+	private boolean allInterfacesFullyConfigured() {
+		for (Iface iface : this.interfaces.values()) {
+			if (!isIfaceReadyForRip(iface)) {
+				return false;
+			}
+		}
+		return true;
+	}
 
 	/**
 	 * Send a RIP request to multicast destination on each interface.
 	 */
 	private void sendRipRequestAll() {
 		for (Iface outIface : this.interfaces.values()) {
+			if (!isIfaceReadyForRip(outIface)) {
+				continue;
+			}
 			RIPv2 rip = new RIPv2();
 			rip.setCommand(RIPv2.COMMAND_REQUEST);
 			sendRipPacket(rip, outIface, IPv4.toIPv4Address("224.0.0.9"),
@@ -234,6 +307,9 @@ public void startRip()
 	 */
 	private void sendRipResponseAll() {
 		for (Iface outIface : this.interfaces.values()) {
+			if (!isIfaceReadyForRip(outIface)) {
+				continue;
+			}
 			RIPv2 rip = buildRipResponsePayload();
 			sendRipPacket(rip, outIface, IPv4.toIPv4Address("224.0.0.9"),
 				Ethernet.toMACAddress("FF:FF:FF:FF:FF:FF"));
@@ -264,6 +340,9 @@ public void startRip()
 	 * Send a RIP packet out one interface with provided L2/L3 destination.
 	 */
 	private void sendRipPacket(RIPv2 rip, Iface outIface, int dstIp, byte[] dstMac) {
+		if (!isIfaceReadyForRip(outIface)) {
+			return;
+		}
 		UDP udp = new UDP();
 		udp.setSourcePort(UDP.RIP_PORT);
 		udp.setDestinationPort(UDP.RIP_PORT);
@@ -311,13 +390,14 @@ public void startRip()
 			}
 		}
 	}
-@Override
-public void destroy()
-{
-    if (this.ripTimer != null)
-    {
-        this.ripTimer.cancel();
-    }
-    super.destroy();
-}
+	@Override
+	public void destroy() {
+		if (this.ripTimer != null) {
+			this.ripTimer.cancel();
+		}
+		if (this.ripStartRetryTimer != null) {
+			this.ripStartRetryTimer.cancel();
+		}
+		super.destroy();
+	}
 }
