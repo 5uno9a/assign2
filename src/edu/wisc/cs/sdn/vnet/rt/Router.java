@@ -13,29 +13,21 @@ import net.floodlightcontroller.packet.Ethernet;
 import net.floodlightcontroller.packet.IPv4;
 import net.floodlightcontroller.packet.MACAddress;
 
-
-
 /**
+ * Virtual IP router for the CS640 virtual network.
+ * Forwards IPv4 using the route table and static ARP; can run RIPv2 when no -r file is given.
+ *
  * @author Aaron Gember-Jacobson and Anubhavnidhi Abhashkumar
  */
 public class Router extends Device {
-	/** User asked for RIP (no static -r); start may wait until HW is complete */
+
+	// State
 	private boolean ripModeRequested = false;
-
-	/** True once RIP is running (direct routes + timer installed) */
 	private boolean ripEnabled = false;
-
-	/** Periodic RIP timer (10s advertisements + cleanup) */
 	private Timer ripTimer;
-
-	/** Retries RIP startup until all interfaces have MAC/IP/mask (POX timing) */
-	private Timer ripStartRetryTimer;	
-
-    /** Routing table for the router */
-    private RouteTable routeTable;
-
-    /** ARP cache for the router */
-    private ArpCache arpCache;
+	private Timer ripStartRetryTimer;
+	private RouteTable routeTable;
+	private ArpCache arpCache;
 
     /**
      * Creates a router for a specific host.
@@ -67,9 +59,7 @@ public class Router extends Device {
         }
 
         System.out.println("Loaded static route table");
-        System.out.println("-------------------------------------------------");
         System.out.print(this.routeTable.toString());
-        System.out.println("-------------------------------------------------");
     }
 
     /**
@@ -85,16 +75,10 @@ public class Router extends Device {
         }
 
         System.out.println("Loaded static ARP cache");
-        System.out.println("----------------------------------");
         System.out.print(this.arpCache.toString());
-        System.out.println("----------------------------------");
     }
 
-	/**
-	 * Handle an Ethernet packet received on a specific interface.
-	 * @param etherPacket the Ethernet packet that was received
-	 * @param inIface the interface on which the packet was received
-	 */
+	// Packet forwarding (IPv4 transit traffic)
 	public void handlePacket(Ethernet etherPacket, Iface inIface) {
 		tryStartRipIfReady();
 
@@ -103,24 +87,21 @@ public class Router extends Device {
 				etherPacket.toString().replace("\n", "\n\t")
 		);
 
-		// 1. Only handle IPv4 packets
 		if (etherPacket.getEtherType() != Ethernet.TYPE_IPv4) {
-			return; // drop
+			return;
 		}
 
 		IPv4 ip = (IPv4) etherPacket.getPayload();
 
-		// verify IPv4 checksum using IPv4's own logic
 		short origCksum = ip.getChecksum();
-		ip.resetChecksum();   // sets checksum field to 0
-		ip.serialize();       // recomputes checksum and stores it in ip
+		ip.resetChecksum();
+		ip.serialize();
 		short computedCksum = ip.getChecksum();
-
 		if (computedCksum != origCksum) {
 			return;
 		}
 
-		/* RIP control-plane packet handling (UDP dst port 520). */
+		// RIP (UDP 520): handle here, do not forward as data
 		if (this.ripEnabled
 			&& ip.getProtocol() == IPv4.PROTOCOL_UDP
 			&& ip.getPayload() instanceof UDP) {
@@ -132,52 +113,44 @@ public class Router extends Device {
 			}
 		}
 
-		// decrement TTL and recompute checksum again
 		int ttl = ip.getTtl() & 0xff;
 		if (ttl <= 1) {
 			return;
 		}
 		ip.setTtl((byte) (ttl - 1));
-
 		ip.resetChecksum();
 		ip.serialize();
 
-		// 4. Drop packets destined to the router itself
 		int dstIp = ip.getDestinationAddress();
 		for (Iface iface : this.interfaces.values()) {
 			if (iface.getIpAddress() == dstIp) {
-				return; // destined to router -> local delivery ignored
+				return;
 			}
 		}
 
-		// 5. Route lookup – longest prefix match
 		RouteEntry best = this.routeTable.lookup(dstIp);
 		if (best == null) {
-			return; // no route -> drop
+			return;
 		}
 
-		// 6. Determine next-hop IP
 		int gw = best.getGatewayAddress();
 		int nextHop = (gw != 0) ? gw : dstIp;
 
-		// 7. Find outgoing interface
 		Iface outIface = best.getInterface();
 		if (outIface == null) {
-			return; // should not happen, but be safe
+			return;
 		}
 
-		/* Never route a packet back out the interface it arrived on. */
+		// Do not send the packet back out the interface it arrived on
 		if (outIface == inIface) {
 			return;
 		}
 
-		// 8. ARP lookup for nextHop
 		ArpEntry ae = this.arpCache.lookup(nextHop);
 		if (ae == null) {
-			return; // no ARP entry -> drop (no ARP resolution in this assignment)
+			return;
 		}
 
-		// 9. Rewrite Ethernet header
 		MACAddress dstMac = ae.getMac();
 		MACAddress srcMac = outIface.getMacAddress();
 		if (dstMac == null || srcMac == null) {
@@ -187,22 +160,14 @@ public class Router extends Device {
 
 		etherPacket.setDestinationMACAddress(dstMac.toBytes());
 		etherPacket.setSourceMACAddress(srcMac.toBytes());
-
-		// 10. Send the packet out
 		sendPacket(etherPacket, outIface);
-
-
-		/********************************************************************/
 	}
 
-	/** Enable RIP before VNS_HW_INFO is read (call from Main). */
+	// RIP startup (dynamic routes when no static -r table)
 	public void setRipModeRequested() {
 		this.ripModeRequested = true;
 	}
 
-	/**
-	 * After HW info (and ARP load order), complete RIP startup or schedule retries.
-	 */
 	public void finishRipStartup() {
 		tryStartRipIfReady();
 		if (this.ripModeRequested && !this.ripEnabled) {
@@ -210,7 +175,6 @@ public class Router extends Device {
 		}
 	}
 
-	/** @deprecated use setRipModeRequested + finishRipStartup from Main */
 	public void startRip() {
 		setRipModeRequested();
 		finishRipStartup();
@@ -240,9 +204,7 @@ public class Router extends Device {
 		}, 250, 250);
 	}
 
-	/**
-	 * Called after VNS_HW_INFO is applied; starts RIP if all interfaces are configured.
-	 */
+	// RIP: enable direct routes, request, periodic updates and expiry
 	public void tryStartRipIfReady() {
 		if (!this.ripModeRequested || this.ripEnabled) {
 			return;
@@ -253,7 +215,6 @@ public class Router extends Device {
 
 		this.ripEnabled = true;
 
-		// Insert directly connected routes (never expire)
 		for (Iface iface : this.interfaces.values()) {
 			int subnet = iface.getIpAddress() & iface.getSubnetMask();
 			this.routeTable.insertDirect(subnet, iface.getSubnetMask(), iface);
@@ -271,6 +232,7 @@ public class Router extends Device {
 		}, 10000, 10000);
 	}
 
+	// RIP: interface must be usable before sending
 	private static boolean isIfaceReadyForRip(Iface iface) {
 		return iface != null
 			&& iface.getMacAddress() != null
@@ -287,9 +249,7 @@ public class Router extends Device {
 		return true;
 	}
 
-	/**
-	 * Send a RIP request to multicast destination on each interface.
-	 */
+	// RIP: build and send advertisements
 	private void sendRipRequestAll() {
 		for (Iface outIface : this.interfaces.values()) {
 			if (!isIfaceReadyForRip(outIface)) {
@@ -302,9 +262,6 @@ public class Router extends Device {
 		}
 	}
 
-	/**
-	 * Send unsolicited RIP responses to multicast destination on each interface.
-	 */
 	private void sendRipResponseAll() {
 		for (Iface outIface : this.interfaces.values()) {
 			if (!isIfaceReadyForRip(outIface)) {
@@ -316,9 +273,6 @@ public class Router extends Device {
 		}
 	}
 
-	/**
-	 * Build a RIP response containing all known routes.
-	 */
 	private RIPv2 buildRipResponsePayload() {
 		RIPv2 rip = new RIPv2();
 		rip.setCommand(RIPv2.COMMAND_RESPONSE);
@@ -336,9 +290,6 @@ public class Router extends Device {
 		return rip;
 	}
 
-	/**
-	 * Send a RIP packet out one interface with provided L2/L3 destination.
-	 */
 	private void sendRipPacket(RIPv2 rip, Iface outIface, int dstIp, byte[] dstMac) {
 		if (!isIfaceReadyForRip(outIface)) {
 			return;
@@ -364,14 +315,11 @@ public class Router extends Device {
 		sendPacket(ether, outIface);
 	}
 
-	/**
-	 * Process incoming RIP request/response.
-	 */
+	// RIP: process incoming request or response
 	private void handleRipPacket(Ethernet etherPacket, IPv4 ip, UDP udp, Iface inIface) {
 		RIPv2 rip = (RIPv2) udp.getPayload();
 
 		if (rip.getCommand() == RIPv2.COMMAND_REQUEST) {
-			/* Reply directly to requester (unicast response). */
 			RIPv2 response = buildRipResponsePayload();
 			sendRipPacket(response, inIface, ip.getSourceAddress(), etherPacket.getSourceMACAddress());
 			return;
@@ -390,6 +338,8 @@ public class Router extends Device {
 			}
 		}
 	}
+
+	// Shutdown
 	@Override
 	public void destroy() {
 		if (this.ripTimer != null) {
@@ -401,3 +351,4 @@ public class Router extends Device {
 		super.destroy();
 	}
 }
+
